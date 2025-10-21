@@ -1,0 +1,60 @@
+name: Reusable Spring Unit Test
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: 'JDK version to use (default 11)'
+        required: false
+        type: string
+        default: '11'
+      working-directory:
+        description: 'Directory where Maven project is located'
+        required: false
+        type: string
+        default: './java'
+    secrets:
+      # Needed to be able to access the repo
+      GITHUB_TOKEN:
+        required: true
+jobs:
+  spring-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up JDK ${{ inputs.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Run Maven Unit Tests
+        id: tests
+        working-directory: ${{ inputs.working-directory }}
+        run: mvn clean test
+        continue-on-error: true
+
+      - name: Comment failure on PR
+        if: steps.tests.outcome == 'failure' && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          hide_and_recreate: true
+          hide_classify: "OUTDATED"
+          header: test-results
+          message: |
+            ❌ **Unit tests failed!**
+            - Commit: ${{ github.sha }}
+            Please review the test logs in the [Actions tab](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
+
+      - name: Fail job if tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
