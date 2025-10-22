@@ -53,7 +53,7 @@ jobs:
     strategy:
       matrix:
         # Parse into array from string (comma separated)
-        project: ${{ fromJson(format('["{0}"]', join(inputs.projects, '","'))) }}
+        project: ${{ fromJson(inputs.projects) }}
       fail-fast: false
 
     steps:
