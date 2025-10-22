@@ -71,6 +71,10 @@ jobs:
             - Commit: ${{ github.sha }}
             Please review the test logs in the [Actions tab](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
 
+      - name: Fail job if tests failed
+        if: ${{ steps.jest-tests.outcome == 'failure' || steps.eslint-tests.outcome == 'failure' }}
+        run: exit 1
+
   Summary:
     runs-on: ubuntu-latest
     needs: [Unit-Tests]
