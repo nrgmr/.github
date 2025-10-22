@@ -12,10 +12,6 @@ on:
         required: false
         type: string
         default: './java'
-    secrets:
-      # Needed to be able to access the repo
-      GITHUB_TOKEN:
-        required: true
 jobs:
   spring-unit-tests:
     runs-on: ubuntu-latest
