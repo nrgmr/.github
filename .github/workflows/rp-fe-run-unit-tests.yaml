@@ -12,43 +12,8 @@ on:
         default: '12.x'
         type: string
 jobs:
-  UI-Project-Base-Setup:
-    name: Base Setup - Get file differences
-    runs-on: ubuntu-latest
-
-    outputs:
-      changed_files: ${{ steps.changed.outputs.changed_files }}
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ inputs.node-version }}
-
-      - name: Get File Differences
-        id: changed
-        run: |
-          BASE_REF="${{ github.event.pull_request.base.ref }}"
-          echo "Comparing against base branch: $BASE_REF"
-          # Ensure we fetch full history for base branch so a merge base exists
-          git fetch --unshallow || true
-
-          # Make sure the base branch exists locally
-          BASE_REF="${{ github.event.pull_request.base.ref }}"
-          git fetch origin "$BASE_REF:$BASE_REF"
-
-          git diff --name-only "$BASE_REF"...HEAD > changed_files.txt
-          echo "Changed files:"
-          cat changed_files.txt
-          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
-          cat changed_files.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
   Unit-Tests:
     name: Run Unit Tests
-    needs: UI-Project-Base-Setup
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -59,29 +24,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Restore changed files list
-        run: |
-          echo "${{ needs.UI-Project-Base-Setup.outputs.changed_files }}" > changed_files.txt
-
-      - name: Check if this project changed
-        id: check
-        run: |
-          PROJECT="${{ matrix.project }}"
-          if grep -q "^${PROJECT}/" changed_files.txt; then
-            echo "CHANGED=true" >> $GITHUB_ENV
-          else
-            echo "CHANGED=false" >> $GITHUB_ENV
-          fi
-
       - name: Setup Node.js
-        if: env.CHANGED == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
 
       # This needs to be run on every matrix
       - name: Setup Shared UI
-        if: env.CHANGED == 'true'
         working-directory: UI/shared-ui
         run: |
           sed -i 's#input: "dist/esm/dist/dts/index\.d\.ts",#input: "dist/esm/index.d.ts",#' rollup.config.js
@@ -90,21 +39,28 @@ jobs:
           npm run build
 
       - name: Setup ${{ matrix.project }}
-        if: env.CHANGED == 'true'
         working-directory: ${{ matrix.project }}
         run: |
           yalc add shared-ui
           npm i
 
-      - name: Run Unit Tests for ${{ matrix.project }}
-        id: tests
-        if: env.CHANGED == 'true'
+      - name: Run Eslint for ${{ matrix.project }}
+        id: eslint-tests
         working-directory: ${{ matrix.project }}
         continue-on-error: true
-        run: npm run test
+        run: |
+          npm run test:clean || echo "test:clean failed, continuing..."
+          npm run lint
+
+      - name: Run Jest for ${{ matrix.project }}
+        id: jest-tests
+        working-directory: ${{ matrix.project }}
+        continue-on-error: true
+        run: |
+          npx cross-env NODE_ENV=test jest --coverage
 
       - name: Comment failure on PR
-        if: env.CHANGED == 'true' && steps.tests.outcome == 'failure' && github.event_name == 'pull_request'
+        if: ${{ (steps.jest-tests.outcome == 'failure' || steps.eslint-tests.outcome == 'failure') && github.event_name == 'pull_request' }}
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           hide_and_recreate: true
@@ -127,4 +83,5 @@ jobs:
             exit 1
           else
             echo "All tests passed or were skipped."
+          fi
 
