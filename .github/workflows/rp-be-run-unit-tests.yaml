@@ -1,4 +1,4 @@
-name: Reusable Spring Unit Test
+name: Reusable Research Platform Spring Unit Test
 on:
   workflow_call:
     inputs:
