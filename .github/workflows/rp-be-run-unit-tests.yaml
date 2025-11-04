@@ -30,21 +30,13 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Cache Dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-
       - name: Run Maven Unit Tests
         id: tests
         working-directory: ${{ inputs.working-directory }}
         run: |
           # Capture logs
           set -o pipefail
-          mvn -B -ntp clean test | tee mvn-test.log
+          mvn clean test | tee mvn-test.log
         continue-on-error: true
 
       - name: Extract test summary
