@@ -36,7 +36,7 @@ jobs:
         run: |
           # Capture logs
           set -o pipefail
-          mvn clean test | tee mvn-test.log
+          mvn -B -ntp clean test | tee mvn-test.log
         continue-on-error: true
 
       - name: Extract test summary
