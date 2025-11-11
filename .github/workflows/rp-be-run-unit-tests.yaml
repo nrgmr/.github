@@ -1,0 +1,74 @@
+name: Reusable Research Platform Spring Unit Test
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: 'JDK version to use (default 11)'
+        required: false
+        type: string
+        default: '11'
+      working-directory:
+        description: 'Directory where Maven project is located'
+        required: false
+        type: string
+        default: './java'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spring-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up JDK ${{ inputs.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run Maven Unit Tests
+        id: tests
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          # Capture logs
+          set -o pipefail
+          mvn -B -ntp clean test | tee mvn-test.log
+        continue-on-error: true
+
+      - name: Extract test summary
+        id: summary
+        if: always()
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          # Grab the last occurrence of "Tests run:" from the Maven log
+          summary_line=$(grep -E "Tests run:" mvn-test.log | tail -n 1 || echo "No tests found")
+          status="Initialized Status - You should not see this"
+
+          if echo "$summary_line" | grep -Eq "(Failures: [1-9][0-9]*)|(Errors: [1-9][0-9]*)"; then
+            status="❌ **Some tests failed!**"
+          fi
+
+          echo "summary_line=$summary_line" >> $GITHUB_OUTPUT
+          echo "status=$status" >> $GITHUB_OUTPUT
+
+      - name: Comment failure on PR
+        if: steps.tests.outcome == 'failure' && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          hide_and_recreate: true
+          hide_classify: "OUTDATED"
+          header: test-results
+          message: |
+            ${{ steps.summary.outputs.status }}
+            - ${{ steps.summary.outputs.summary_line }}
+            - Commit: ${{ github.sha }}
+
+            Please review the test logs in the [Actions tab](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
+
+      - name: Fail job if tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1

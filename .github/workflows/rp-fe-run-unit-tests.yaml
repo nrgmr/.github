@@ -1,0 +1,180 @@
+name: Reusable Research Platform UI Unit Test
+on:
+  workflow_call:
+    inputs:
+      projects:
+        description: 'String JSON Array of UI projects to test (e.g., "["UI/cinesysplus,UI/copilot"]")'
+        required: true
+        type: string
+      node-version:
+        description: 'Node.js version'
+        required: false
+        default: '12.x'
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  Unit-Tests:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Parse into array from string (comma separated)
+        project: ${{ fromJson(inputs.projects) }}
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Need this because artifact names cannot contain forward slash
+      - name: Sanitize project name
+        id: sanitize
+        run: |
+          SAFE_NAME="${{ matrix.project }}"
+          SAFE_NAME="${SAFE_NAME//\//-}"   # replace / with -
+          echo "safe_name=$SAFE_NAME" >> $GITHUB_OUTPUT
+
+      # Cache global npm cache to speed up "npm i -g yarn yalc"
+      - name: Cache global npm cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-cache-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-cache-
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      # This needs to be run on every matrix
+      - name: Setup Shared UI
+        working-directory: UI/shared-ui
+        run: |
+          sed -i 's#input: "dist/esm/dist/dts/index\.d\.ts",#input: "dist/esm/index.d.ts",#' rollup.config.js
+          npm i -g yarn yalc
+          npm i
+          npm run build
+
+      - name: Setup ${{ matrix.project }}
+        working-directory: ${{ matrix.project }}
+        run: |
+          yalc add shared-ui
+          npm i
+
+      # ----------------------------------------- #
+      # Eslint - Run test and upload as artifact
+
+      - name: Run Eslint for ${{ matrix.project }}
+        id: eslint-tests
+        working-directory: ${{ matrix.project }}
+        continue-on-error: true
+        run: |
+          npm run test:clean || echo "test:clean failed, continuing..."
+          mkdir -p reports
+          # Save all outputs hence the 2>&1 - without it, stdout only includes the passing lines
+          npx eslint . -f stylish --no-color > reports/eslint-report.txt 2>&1
+
+      - name: Upload ESLint report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eslint-report-${{ steps.sanitize.outputs.safe_name }}
+          path: ${{ matrix.project }}/reports/eslint-report.txt
+          if-no-files-found: ignore
+
+      # ----------------------------------------- #
+      # Jest - Run test and upload as artifact
+
+      - name: Run Jest for ${{ matrix.project }}
+        id: jest-tests
+        working-directory: ${{ matrix.project }}
+        continue-on-error: true
+        run: |
+          # Save all outputs hence the 2>&1 - without it, stdout only includes the passing lines
+          npx cross-env NODE_ENV=test jest --coverage --no-color > jest-results.txt 2>&1
+
+      - name: Upload Jest coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # Forward slash not allowed
+          name: jest-results-${{ steps.sanitize.outputs.safe_name }}
+          path: ${{ matrix.project }}/jest-results.txt
+          if-no-files-found: ignore
+
+      # ----------------------------------------- #
+      # Record outcome for aggregation later
+      - name: Record test outcomes
+        if: always()
+        run: |
+          mkdir -p job-results
+          echo "${{ matrix.project }}: ESLint=${{ steps.eslint-tests.outcome }}, Jest=${{ steps.jest-tests.outcome }}" >> job-results/results.txt
+
+      # This is merely to be used in the next job, easier to fetch as artifact
+      - name: Upload per-matrix results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-results-${{ steps.sanitize.outputs.safe_name }}
+          path: job-results/results.txt
+          if-no-files-found: ignore
+
+      - name: Fail job if tests failed
+        if: ${{ steps.jest-tests.outcome == 'failure' || steps.eslint-tests.outcome == 'failure' }}
+        run: exit 1
+
+  Summary:
+    runs-on: ubuntu-latest
+    needs: [Unit-Tests]
+    if: always()
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Gather results from artifact and save locally to be used for comment
+      - name: Aggregate results
+        id: aggregate
+        run: |
+          echo "## Aggregated Test Results" > summary.md
+          if compgen -G "artifacts/job-results-*/*.txt" > /dev/null; then
+            grep -E "ESLint=failure|Jest=failure" artifacts/job-results-*/*.txt >> summary.md || echo "✅ All test suites passed!" >> summary.md
+          else
+            echo "No results found." >> summary.md
+          fi
+          echo "summary_content<<EOF" >> $GITHUB_OUTPUT
+          cat summary.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # Get output from previous step and display in comment
+      - name: Comment summary on PR (only if failures)
+        if: ${{ needs.Unit-Tests.result == 'failure' && github.event_name == 'pull_request' }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          hide_and_recreate: true
+          hide_classify: "OUTDATED"
+          header: test-results
+          message: |
+            ❌ **Some projects failed test suites!**
+
+            Please review the details below (only failed or errored projects are listed):
+            ```
+            ${{ steps.aggregate.outputs.summary_content }}
+            ```
+
+            You can view full ESLint & Jest artifacts in the [Actions run logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+      - name: Show overall status
+        run: |
+          if [[ "${{ needs.Unit-Tests.result }}" == "failure" ]]; then
+            echo "One or more test suites failed."
+            exit 1
+          else
+            echo "All tests passed or were skipped."
+          fi
+
