@@ -1,0 +1,127 @@
+name: ADO Trigger – Status Change (multi-project)
+
+on:
+  workflow_call:
+    inputs:
+      org:
+        description: Azure DevOps organization (the {org} in https://dev.azure.com/{org})
+        required: true
+        type: string
+      default_state:
+        description: Fallback state if project not in map
+        required: false
+        default: Ready for Review
+        type: string
+      project_state_map_json:
+        description: JSON map of { "ProjectName": "TargetState", ... }
+        required: false
+        default: "{}"
+        type: string
+      parse_commits:
+        description: Also parse AB# refs from PR commit messages
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      ado_pat:
+        required: true
+
+jobs:
+  set_status:
+    name: Set linked ADO items to target state (multi-project)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure jq and gh are available
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+          which gh || (type -p curl >/dev/null && sudo mkdir -p -m 755 /usr/local/bin && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /tmp/gh.gpg && sudo mv /tmp/gh.gpg /usr/share/keyrings/githubcli-archive-keyring.gpg && type -p apt >/dev/null && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && sudo apt update && sudo apt install gh -y)
+
+      - name: Collect AB# IDs from PR title/body
+        id: ids_pr
+        shell: bash
+        run: |
+          TEXT="${{ github.event.pull_request.title }} ${{ github.event.pull_request.body }}"
+          echo "$TEXT" | grep -Eo 'AB#[0-9]+' | sed 's/AB#//' | sort -u > ids.txt || true
+          echo "IDs from title/body:"
+          cat ids.txt || true
+
+      - name: (Optional) Collect AB# IDs from PR commits
+        if: ${{ inputs.parse_commits }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits \
+            | jq -r '.[].commit.message' \
+            | grep -Eo 'AB#[0-9]+' | sed 's/AB#//' | sort -u > ids_from_commits.txt || true
+          (cat ids.txt ids_from_commits.txt 2>/dev/null || true) | sort -u > ids_merged.txt
+          mv ids_merged.txt ids.txt
+          echo "IDs after commit scan:"
+          cat ids.txt || true
+
+      - name: Decide if we have IDs and PR is not draft
+        id: gate
+        shell: bash
+        run: |
+          has_ids=false
+          if [ -s ids.txt ]; then has_ids=true; fi
+          echo "has_ids=$has_ids" >> $GITHUB_OUTPUT
+          echo "is_draft=${{ github.event.pull_request.draft }}" >> $GITHUB_OUTPUT
+
+      - name: Update work items via org-level API
+        if: ${{ steps.gate.outputs.has_ids == 'true' && !github.event.pull_request.draft }}
+        env:
+          ORG: ${{ inputs.org }}
+          PAT: ${{ secrets.ado_pat }}
+          DEFAULT_STATE: ${{ inputs.default_state }}
+          MAP_JSON: ${{ inputs.project_state_map_json }}
+        shell: bash
+        run: |
+          echo "Default target state: $DEFAULT_STATE"
+          echo "Project-state map: $MAP_JSON"
+
+          while read -r ID; do
+            echo "----"
+            echo "Fetching work item $ID ..."
+            ITEM=$(curl -sS -u :$PAT "https://dev.azure.com/$ORG/_apis/wit/workitems/$ID?api-version=7.1")
+            if [ -z "$ITEM" ] || [ "$(echo "$ITEM" | jq -r '.id // empty')" = "" ]; then
+              echo "Could not read work item $ID (check permissions or ID). Skipping."
+              continue
+            fi
+
+            CURR_STATE=$(echo "$ITEM" | jq -r '.fields["System.State"]')
+            PROJECT=$(echo "$ITEM" | jq -r '.fields["System.TeamProject"]')
+            TARGET_STATE=$(jq -r --arg p "$PROJECT" --arg d "$DEFAULT_STATE" \
+              'try (fromjson[$p]) catch $d' <<< "$MAP_JSON")
+
+            echo "Work item $ID in project '$PROJECT' currently '$CURR_STATE' → target '$TARGET_STATE'"
+
+            if [ "$CURR_STATE" = "$TARGET_STATE" ]; then
+              echo "Already in target state. Skipping."
+              continue
+            fi
+
+            RESP=$(curl -sS -u :$PAT \
+              -H "Content-Type: application/json-patch+json" \
+              -X PATCH \
+              "https://dev.azure.com/$ORG/_apis/wit/workitems/$ID?api-version=7.1-preview.3" \
+              --data "[{\"op\":\"add\",\"path\":\"/fields/System.State\",\"value\":\"$TARGET_STATE\"}]")
+
+            NEW_STATE=$(echo "$RESP" | jq -r '.fields["System.State"] // empty')
+            if [ "$NEW_STATE" = "$TARGET_STATE" ]; then
+              echo "✅ Updated $ID → $NEW_STATE"
+            else
+              echo "⚠️ Update may have failed for $ID. Response:"
+              echo "$RESP" | jq -r '. | tostring'
+            fi
+          done < ids.txt
+
+      - name: Notice for draft PR
+        if: ${{ steps.gate.outputs.has_ids == 'true' && github.event.pull_request.draft }}
+        run: echo "PR is draft; will update states when marked Ready for review."
+
+      - name: Notice for no IDs
+        if: ${{ steps.gate.outputs.has_ids != 'true' }}
+        run: echo "No AB# refs found in PR. Include AB#<id> in title/body/commits to enable updates."
+
