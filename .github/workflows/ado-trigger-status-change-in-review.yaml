@@ -13,7 +13,7 @@ on:
         default: Ready for Review
         type: string
       project_state_map_json:
-        description: JSON map of { "ProjectName": "TargetState", ... }
+        description: 'JSON map of { "ProjectName": "TargetState", ... }'
         required: false
         default: "{}"
         type: string
