@@ -10,7 +10,7 @@ on:
       default_state:
         description: Fallback state if project not in map
         required: false
-        default: Ready for Review
+        default: In Review
         type: string
       project_state_map_json:
         description: 'JSON map of { "ProjectName": "TargetState", ... }'
@@ -119,7 +119,7 @@ jobs:
 
       - name: Notice for draft PR
         if: ${{ steps.gate.outputs.has_ids == 'true' && github.event.pull_request.draft }}
-        run: echo "PR is draft; will update states when marked Ready for review."
+        run: echo "PR is draft; will update states when marked In Review."
 
       - name: Notice for no IDs
         if: ${{ steps.gate.outputs.has_ids != 'true' }}
