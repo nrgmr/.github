@@ -39,10 +39,12 @@ jobs:
 
       - name: Collect AB# IDs from PR title/body
         id: ids_pr
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         shell: bash
         run: |
-          TEXT="${{ github.event.pull_request.title }} ${{ github.event.pull_request.body }}"
-          echo "$TEXT" | grep -Eo 'AB#[0-9]+' | sed 's/AB#//' | sort -u > ids.txt || true
+          printf '%s %s' "$PR_TITLE" "$PR_BODY" | grep -Eo 'AB#[0-9]+' | sed 's/AB#//' | sort -u > ids.txt || true
           echo "IDs from title/body:"
           cat ids.txt || true
 
