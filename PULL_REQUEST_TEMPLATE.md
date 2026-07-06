@@ -19,9 +19,29 @@
 
 ## Validation
 
-<!-- Here's how you can play with it 🏄 -->
-<!-- How should a reviewer with limited context be able to prove this change 'does what it says on the tin'? -->
-<!-- Please include any type of expected results whether screenshots or output to compare. -->
+<!-- Show your work 🧪 -->
+
+<!-- What did you do to convince yourself that this change works? -->
+
+<!-- This is not a list of things a reviewer could do; it is the evidence that you already validated the change. -->
+
+<!-- Please describe the steps you personally took, what you expected to happen, and what actually happened. -->
+
+<!-- Include screenshots, output, commands, test results, or notes about the local environment when helpful. -->
+
+<!-- Useful ways to frame this: -->
+
+<!-- - I ran the app locally and confirmed... -->
+
+<!-- - I tested this by... -->
+
+<!-- - I verified that... -->
+
+<!-- - I checked the regression case where... -->
+
+<!-- - I ran the relevant tests and saw... -->
+
+<!-- - I was not able to validate..., so reviewers should pay extra attention to... -->
 
 ## Risks
 
