@@ -43,6 +43,8 @@
 
 <!-- - I was not able to validate..., so reviewers should pay extra attention to... -->
 
+<!-- - The tests caught..., which I fixed by... (or: the tests caught nothing) -->
+
 ## Risks
 
 <!-- It mostly works, but I'm worried/thinking about what might happen/go-wrong when ... 😥 -->
@@ -59,6 +61,6 @@ A few things to keep in mind:
   1. **Context**-- What is this? Why does it matter? How are you proposing to make it happen?
   2. **Validation** Does it work? How can I see that it works?
   3. **Risks** Sounds bureaucratic, but if you actually made something, you are already thinking about this. What are the gaps/missing-pieces? What are you worried about?
-- 👾 This template/social-contract is defined in ./.github/PULL_REQUEST_TEMPLATE.md and edits/extensions are encouraged
+- 👾 This template/social-contract is defined in github.com/nrgmr/.github/PULL_REQUEST_TEMPLATE.md and edits/extensions are encouraged
 
 -->
